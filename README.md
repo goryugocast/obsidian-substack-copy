@@ -1,14 +1,16 @@
 # Obsidian Substack Copy
 
-One-click copy for Substack publishing.
+One-click copy for Substack publishing (Mobile & Desktop).
 
-This plugin converts your Markdown article into Substack-compatible HTML, automatically resolving and embedding local images as Base64 data. This allows you to paste directly into the Substack editor with images included, bypassing the need for manual image uploads.
+This plugin converts your Markdown article into Substack-compatible HTML, automatically resolving and embedding local images as Base64 data. This allows you to paste directly into the Substack editor with images included.
 
 ## Features
 
+- **Mobile Support**: Works on iPhone/iPad using standard Clipboard API.
+- **Desktop Support**: Works on Mac using Electron Clipboard API.
 - **Zero Config**: Just install and run the command.
 - **Image Embedding**: Automatically finds local images referenced in your note and embeds them as Base64.
-- **Format Preservation**: Uses Obsidian's core Markdown engine to preserve your formatting (bold, lists, etc.).
+- **Format Preservation**: Uses Obsidian's core Markdown engine to preserve your formatting.
 
 ## How to Use
 
