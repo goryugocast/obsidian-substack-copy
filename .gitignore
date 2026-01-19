@@ -1,0 +1,17 @@
+# Visual Studio Code
+.vscode/
+
+# Build
+fs_cache/
+main.js
+styles.css
+manifest.json
+
+# Node modules
+node_modules/
+
+# Mac
+.DS_Store
+
+# Obsidian
+.obsidian/
