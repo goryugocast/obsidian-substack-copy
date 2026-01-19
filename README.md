@@ -7,6 +7,7 @@ This plugin converts your Markdown article into Substack-compatible HTML, automa
 ## Features
 
 - **Mobile Support**: Works on iPhone/iPad using standard Clipboard API.
+    - *Note*: Copying heavily image-laden articles may fail on mobile due to iOS/Android clipboard memory limits. Text-only copying works reliably.
 - **Desktop Support**: Works on Mac using Electron Clipboard API.
 - **Zero Config**: Just install and run the command.
 - **Image Embedding**: Automatically finds local images referenced in your note and embeds them as Base64.
