@@ -31,3 +31,7 @@ This plugin converts your Markdown article into Substack-compatible HTML, automa
 npm install
 npm run dev
 ```
+
+## Known Issues
+
+- **Mobile Clipboard Size Limit**: On iOS/iPadOS, attempting to copy articles with large or multiple images may result in an "Unable to encode image" or "NotAllowedError" due to the operating system's strict limit on clipboard data size. If this happens, try copying the article in smaller chunks or plain text.
