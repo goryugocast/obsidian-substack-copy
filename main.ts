@@ -18,6 +18,33 @@ export default class SubstackCopyPlugin extends Plugin {
                 return false;
             }
         });
+
+        // Register File Menu Event (for Mobile '...' menu)
+        this.registerEvent(
+            this.app.workspace.on("file-menu", (menu, file) => {
+                if (file instanceof TFile && file.extension === 'md') {
+                    menu.addItem((item) => {
+                        item
+                            .setTitle("Copy for Substack")
+                            .setIcon("documents")
+                            .onClick(async () => {
+                                const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+                                if (view && view.file === file) {
+                                    this.processMarkdown(view);
+                                } else {
+                                    // Fallback if view is not active or mismatch
+                                    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+                                    if (activeView && activeView.file?.path === file.path) {
+                                        this.processMarkdown(activeView);
+                                    } else {
+                                        new Notice("Please open the note to copy.");
+                                    }
+                                }
+                            });
+                    });
+                }
+            })
+        );
     }
 
     async processMarkdown(view: MarkdownView) {
@@ -51,24 +78,31 @@ export default class SubstackCopyPlugin extends Plugin {
                 });
             } else {
                 // Mobile Fallback using standard Clipboard API
-                const data = [new ClipboardItem({
-                    "text/plain": new Blob([plainText], { type: "text/plain" }),
-                    "text/html": new Blob([html], { type: "text/html" })
-                })];
-                await navigator.clipboard.write(data);
+                try {
+                    const data = [new ClipboardItem({
+                        "text/plain": new Blob([plainText], { type: "text/plain" }),
+                        "text/html": new Blob([html], { type: "text/html" })
+                    })];
+                    await navigator.clipboard.write(data);
+                } catch (mobileError: any) {
+                    console.error("Mobile Clipboard Error:", mobileError);
+                    // Explicitly notify details to the user to help debugging
+                    new Notice("Mobile Copy Error: " + (mobileError.message || mobileError));
+                    throw mobileError;
+                }
             }
 
             new Notice('Content copied for Substack!');
 
-        } catch (error) {
+        } catch (error: any) {
             console.error('Substack Copy Error:', error);
-            new Notice('Error copying content. Check console for details.');
+            new Notice('Error copying content. Check console for details: ' + (error.message || error));
         }
     }
 
     async replaceImagesWithBase64(container: HTMLElement, sourcePath: string) {
         const images = container.querySelectorAll('img');
-        
+
         for (let i = 0; i < images.length; i++) {
             const img = images[i];
             const src = img.getAttribute('src');
@@ -82,9 +116,9 @@ export default class SubstackCopyPlugin extends Plugin {
 
                 let filenameRaw = src.split('/').pop()?.split('?')[0];
                 if (!filenameRaw) continue;
-                
+
                 let filename = decodeURIComponent(filenameRaw);
-                
+
                 let file = this.app.metadataCache.getFirstLinkpathDest(filename, sourcePath);
 
                 if (file) {
