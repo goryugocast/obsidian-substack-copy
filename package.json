@@ -1,6 +1,6 @@
 {
     "name": "obsidian-substack-copy",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "Experimental plugin to copy formatted text and images for Substack.",
     "main": "main.js",
     "scripts": {
@@ -8,7 +8,7 @@
         "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
     },
     "keywords": [],
-    "author": "",
+    "author": "goryugo",
     "license": "MIT",
     "devDependencies": {
         "@types/node": "^16.11.6",
