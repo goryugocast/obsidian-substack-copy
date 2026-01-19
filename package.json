@@ -1,6 +1,6 @@
 {
     "name": "obsidian-substack-copy",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "Experimental plugin to copy formatted text and images for Substack.",
     "main": "main.js",
     "scripts": {

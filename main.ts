@@ -1,4 +1,4 @@
-import { Plugin, Notice, FileSystemAdapter, TFile, MarkdownRenderer, MarkdownView, Component, Platform } from 'obsidian';
+import { Plugin, Notice, FileSystemAdapter, TFile, MarkdownRenderer, MarkdownView, Component, Platform, arrayBufferToBase64 } from 'obsidian';
 
 export default class SubstackCopyPlugin extends Plugin {
     async onload() {
@@ -123,7 +123,7 @@ export default class SubstackCopyPlugin extends Plugin {
 
                 if (file) {
                     const arrayBuffer = await this.app.vault.readBinary(file);
-                    const base64 = this.arrayBufferToBase64(arrayBuffer);
+                    const base64 = arrayBufferToBase64(arrayBuffer);
                     const mimeType = this.getMimeType(file.extension);
                     img.src = `data:${mimeType};base64,${base64}`;
                 }
@@ -146,13 +146,4 @@ export default class SubstackCopyPlugin extends Plugin {
         }
     }
 
-    arrayBufferToBase64(buffer: ArrayBuffer): string {
-        let binary = '';
-        const bytes = new Uint8Array(buffer);
-        const len = bytes.byteLength;
-        for (let i = 0; i < len; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return window.btoa(binary);
-    }
 }
