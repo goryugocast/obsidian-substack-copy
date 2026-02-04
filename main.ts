@@ -58,10 +58,20 @@ export default class SubstackCopyPlugin extends Plugin {
                 markdown = editor.getValue();
             }
 
+            // Pre-process: Remove WikiLinks but keep Embeds
+            // [[Link]] -> Link, [[Link|Alias]] -> Alias
+            // Negative lookbehind (?<!\!) ensures we don't match ![[...]]
+            markdown = markdown.replace(/(?<!\!)\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1');
+
             // 1. Render Markdown to HTML
             // Using a dummy container to render
             const container = document.createElement('div');
             await MarkdownRenderer.render(this.app, markdown, container, file.path, new Component());
+
+            // Post-process: Remove embed titles
+            // Obsidian embeds typically have a header with class 'markdown-embed-title'
+            const embedTitles = container.querySelectorAll('.markdown-embed-title');
+            embedTitles.forEach(el => el.remove());
 
             // 2. Process Images (Base64 Injection)
             await this.replaceImagesWithBase64(container, file.path);
