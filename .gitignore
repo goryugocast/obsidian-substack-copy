@@ -15,3 +15,6 @@ node_modules/
 
 # Obsidian
 .obsidian/
+
+# AI Memos
+Avi_*.md

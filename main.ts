@@ -53,60 +53,148 @@ export default class SubstackCopyPlugin extends Plugin {
             const file = view.file;
             if (!file) return;
 
+            // --- Synchronous processing only (no await) ---
             let markdown = editor.getSelection();
             if (!markdown) {
                 markdown = editor.getValue();
             }
 
-            // Pre-process: Remove WikiLinks but keep Embeds
-            // [[Link]] -> Link, [[Link|Alias]] -> Alias
-            // Negative lookbehind (?<!\!) ensures we don't match ![[...]]
-            markdown = markdown.replace(/(?<!\!)\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1');
+            // Remove frontmatter (YAML)
+            markdown = markdown.replace(/^---[\s\S]*?---\n?/, "");
 
-            // 1. Render Markdown to HTML
-            // Using a dummy container to render
-            const container = document.createElement('div');
-            await MarkdownRenderer.render(this.app, markdown, container, file.path, new Component());
+            // WikiLink transformation: [[Link]] -> Link, [[Link|Alias]] -> Alias
+            markdown = markdown.replace(/(?<!\!)\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, "$1");
 
-            // Post-process: Remove embed titles
-            // Obsidian embeds typically have a header with class 'markdown-embed-title'
-            const embedTitles = container.querySelectorAll('.markdown-embed-title');
-            embedTitles.forEach(el => el.remove());
-
-            // 2. Process Images (Base64 Injection)
-            await this.replaceImagesWithBase64(container, file.path);
-
-            // 3. Write to Clipboard
-            const html = container.innerHTML;
-            const plainText = container.innerText;
+            // Tokenize external links [text](https://url) to restore them after rendering.
+            // Obsidian's MarkdownRenderer treats #tag inside links as tags, 
+            // so we replace links with safe tokens and restore correct <a> tags later.
+            const linkMap: Record<string, { text: string; url: string }> = {};
+            let linkIdx = 0;
+            markdown = markdown.replace(
+                /(?<!\!)\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+                (match, text, url) => {
+                    const token = `SSTKLNK${linkIdx}`;
+                    linkMap[token] = { text, url };
+                    linkIdx++;
+                    return token; // Leave only the token
+                }
+            );
 
             if (Platform.isDesktopApp) {
-                const { clipboard } = require('electron');
-                clipboard.write({
-                    text: plainText,
-                    html: html
-                });
+                // Desktop: Electron Clipboard (Legacy)
+                const container = document.createElement("div");
+                await MarkdownRenderer.render(this.app, markdown, container, file.path, new Component());
+                container.querySelectorAll(".markdown-embed-title").forEach((el) => el.remove());
+                this.restoreLinks(container, linkMap); // Restore tokens to correct <a> tags
+                this.fixLinks(container, false); // Turn internal links to text
+                await this.replaceImagesWithBase64(container, file.path);
+                const { clipboard } = require("electron");
+                clipboard.write({ text: container.innerText, html: container.innerHTML });
+                new Notice("Copied for Substack!");
             } else {
-                // Mobile Fallback using standard Clipboard API
-                try {
-                    const data = [new ClipboardItem({
-                        "text/plain": new Blob([plainText], { type: "text/plain" }),
-                        "text/html": new Blob([html], { type: "text/html" })
-                    })];
-                    await navigator.clipboard.write(data);
-                } catch (mobileError: any) {
-                    console.error("Mobile Clipboard Error:", mobileError);
-                    // Explicitly notify details to the user to help debugging
-                    new Notice("Mobile Copy Error: " + (mobileError.message || mobileError));
-                    throw mobileError;
-                }
+                await this.mobileClipboardWrite(markdown, file.path, linkMap);
             }
 
-            new Notice('Content copied for Substack!');
-
         } catch (error: any) {
-            console.error('Substack Copy Error:', error);
-            new Notice('Error copying content. Check console for details: ' + (error.message || error));
+            console.error("Substack Copy Error:", error);
+            new Notice("Copy error: " + (error.message || error));
+        }
+    }
+
+    async mobileClipboardWrite(markdown: string, filePath: string, linkMap: Record<string, { text: string; url: string }> = {}) {
+        const self = this;
+        const app = this.app;
+
+        // Asynchronously prepare HTML (including images) and plainText
+        const prepareContainer = async () => {
+            const container = document.createElement("div");
+            await MarkdownRenderer.render(app, markdown, container, filePath, new Component());
+            container.querySelectorAll(".markdown-embed-title").forEach((el) => el.remove());
+            // Restore tokenized external links to <a> tags
+            self.restoreLinks(container, linkMap);
+            // Remove Obsidian's CSS variables (color: var(--link-color) etc.)
+            self.sanitizeStyles(container);
+            // Remove internal links and keep style for external links
+            self.fixLinks(container, true);
+            // Reduce extra spacing from li > p etc.
+            self.cleanupHtml(container);
+            await self.replaceImagesWithBase64(container, filePath);
+            return container;
+        };
+
+        // Stage 1: ClipboardItem with Promise (Android / Chrome / Safari 16.4+)
+        // Pass Promise to ClipboardItem to maintain user gesture context
+        try {
+            const htmlBlob = prepareContainer().then(c => new Blob([c.innerHTML], { type: "text/html" }));
+            const textBlob = prepareContainer().then(c => new Blob([c.innerText], { type: "text/plain" }));
+            await (navigator.clipboard as any).write([
+                new ClipboardItem({ "text/html": htmlBlob, "text/plain": textBlob })
+            ]);
+            new Notice("Copied for Substack! (Rich Text + Images)");
+            return;
+        } catch (e1: any) {
+            console.warn("Stage 1 (ClipboardItem html) failed:", e1.message || e1);
+        }
+
+        // Fallbacks for when async processing completes (prepare once)
+        const container = await prepareContainer();
+        const html = container.innerHTML;
+        const plainText = container.innerText;
+
+        // Stage 2: contenteditable + execCommand (Only way to copy rich text on some iOS Safari)
+        try {
+            const editableDiv = document.createElement("div");
+            editableDiv.contentEditable = "true";
+            // Place off-screen (opacity: 0.01 to prevent iOS from disabling it as 'hidden')
+            editableDiv.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0.01;";
+            editableDiv.innerHTML = html;
+            document.body.appendChild(editableDiv);
+            editableDiv.focus();
+
+            const range = document.createRange();
+            range.selectNodeContents(editableDiv);
+            const sel = window.getSelection();
+            if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+
+            const success = document.execCommand("copy");
+            if (sel) sel.removeAllRanges();
+            document.body.removeChild(editableDiv);
+
+            if (success) {
+                new Notice("Copied for Substack! (Rich Text + Images)");
+                return;
+            }
+            throw new Error("execCommand returned false");
+        } catch (e2: any) {
+            console.warn("Stage 2 (contenteditable execCommand) failed:", e2.message || e2);
+        }
+
+        // Stage 3: writeText (Plain Text)
+        try {
+            await navigator.clipboard.writeText(plainText);
+            new Notice("Copied as text (no formatting)");
+            return;
+        } catch (e3: any) {
+            console.warn("Stage 3 (writeText) failed:", e3.message || e3);
+        }
+
+        // Stage 4: textarea + execCommand (Last resort)
+        try {
+            const textArea = document.createElement("textarea");
+            textArea.value = plainText;
+            textArea.style.cssText = "position:fixed;top:-9999px;left:-9999px;";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+            new Notice("Copied as text (Fallback)");
+        } catch (e4: any) {
+            console.error("Stage 4 failed:", e4.message || e4);
+            new Notice("Failed to copy. Please try with the note open.");
         }
     }
 
@@ -156,4 +244,68 @@ export default class SubstackCopyPlugin extends Plugin {
         }
     }
 
+    // Restores tokenized external links to <a> tags
+    restoreLinks(container: HTMLElement, linkMap: Record<string, { text: string; url: string }>) {
+        if (!linkMap || Object.keys(linkMap).length === 0) return;
+        let html = container.innerHTML;
+        let changed = false;
+        for (const [token, { text, url }] of Object.entries(linkMap)) {
+            if (html.includes(token)) {
+                const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                html = html.split(token).join(
+                    `<a href="${url}" target="_blank" rel="noopener noreferrer">${escaped}</a>`
+                );
+                changed = true;
+            }
+        }
+        if (changed) container.innerHTML = html;
+    }
+
+    // Removes Obsidian's CSS variable references
+    sanitizeStyles(container: HTMLElement) {
+        container.querySelectorAll("*").forEach((el) => {
+            el.removeAttribute("class");
+            el.removeAttribute("style");
+        });
+        // Explicitly set base text color
+        (container as any).style.color = "#000000";
+    }
+
+    // Reduces extra spacing from li > p etc.
+    cleanupHtml(container: HTMLElement) {
+        container.querySelectorAll("li > p").forEach((p) => {
+            const parent = p.parentNode;
+            if (parent) {
+                while (p.firstChild) {
+                    parent.insertBefore(p.firstChild, p);
+                }
+                parent.removeChild(p);
+            }
+        });
+        container.querySelectorAll("p, div").forEach((el) => {
+            if (!el.hasChildNodes() || el.innerHTML.trim() === "") {
+                el.remove();
+            }
+        });
+    }
+
+    // Fixes links after rendering
+    fixLinks(container: HTMLElement, isMobile = false) {
+        const links = container.querySelectorAll("a");
+        links.forEach((link) => {
+            const href = link.getAttribute("href") || "";
+            const linkText = link.textContent || "";
+            if (href.startsWith("http://") || href.startsWith("https://")) {
+                link.setAttribute("href", href);
+                link.setAttribute("target", "_blank");
+                link.setAttribute("rel", "noopener noreferrer");
+            } else if (href.startsWith("app://") || href.startsWith("obsidian://")) {
+                const text = document.createTextNode(linkText);
+                link.parentNode?.replaceChild(text, link);
+            } else {
+                link.removeAttribute("href");
+                link.removeAttribute("target");
+            }
+        });
+    }
 }
