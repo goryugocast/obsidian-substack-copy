@@ -73,7 +73,7 @@ export default class SubstackCopyPlugin extends Plugin {
             markdown = markdown.replace(
                 /(?<!\!)\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
                 (match, text, url) => {
-                    const token = `SSTKLNK${linkIdx}`;
+                    const token = `SSTKLNK_${linkIdx}_SSTKEND`;
                     linkMap[token] = { text, url };
                     linkIdx++;
                     return token; // Leave only the token
@@ -86,7 +86,8 @@ export default class SubstackCopyPlugin extends Plugin {
                 await MarkdownRenderer.render(this.app, markdown, container, file.path, new Component());
                 container.querySelectorAll(".markdown-embed-title").forEach((el) => el.remove());
                 this.restoreLinks(container, linkMap); // Restore tokens to correct <a> tags
-                this.fixLinks(container, false); // Turn internal links to text
+                this.fixLinks(container); // Turn internal links to text
+                this.sanitizeHtml(container);
                 await this.replaceImagesWithBase64(container, file.path);
                 const { clipboard } = require("electron");
                 clipboard.write({ text: container.innerText, html: container.innerHTML });
@@ -115,7 +116,9 @@ export default class SubstackCopyPlugin extends Plugin {
             // Remove Obsidian's CSS variables (color: var(--link-color) etc.)
             self.sanitizeStyles(container);
             // Remove internal links and keep style for external links
-            self.fixLinks(container, true);
+            self.fixLinks(container);
+            // Strip nonessential attributes that some editors paste back as text.
+            self.sanitizeHtml(container);
             // Reduce extra spacing from li > p etc.
             self.cleanupHtml(container);
             await self.replaceImagesWithBase64(container, filePath);
@@ -244,21 +247,64 @@ export default class SubstackCopyPlugin extends Plugin {
         }
     }
 
-    // Restores tokenized external links to <a> tags
+    // Restores tokenized external links to <a> tags without rewriting the whole HTML string.
     restoreLinks(container: HTMLElement, linkMap: Record<string, { text: string; url: string }>) {
-        if (!linkMap || Object.keys(linkMap).length === 0) return;
-        let html = container.innerHTML;
-        let changed = false;
-        for (const [token, { text, url }] of Object.entries(linkMap)) {
-            if (html.includes(token)) {
-                const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                html = html.split(token).join(
-                    `<a href="${url}" target="_blank" rel="noopener noreferrer">${escaped}</a>`
-                );
-                changed = true;
-            }
+        const tokens = Object.keys(linkMap);
+        if (tokens.length === 0) return;
+
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        const textNodes: Text[] = [];
+
+        let currentNode = walker.nextNode();
+        while (currentNode) {
+            textNodes.push(currentNode as Text);
+            currentNode = walker.nextNode();
         }
-        if (changed) container.innerHTML = html;
+
+        for (const textNode of textNodes) {
+            const value = textNode.nodeValue ?? "";
+            if (!tokens.some((token) => value.includes(token))) continue;
+
+            const fragment = document.createDocumentFragment();
+            let cursor = 0;
+
+            while (cursor < value.length) {
+                let nextToken: string | null = null;
+                let nextIndex = value.length;
+
+                for (const token of tokens) {
+                    const index = value.indexOf(token, cursor);
+                    if (
+                        index !== -1 &&
+                        (index < nextIndex || (index === nextIndex && (!nextToken || token.length > nextToken.length)))
+                    ) {
+                        nextIndex = index;
+                        nextToken = token;
+                    }
+                }
+
+                if (!nextToken) {
+                    fragment.appendChild(document.createTextNode(value.slice(cursor)));
+                    break;
+                }
+
+                if (nextIndex > cursor) {
+                    fragment.appendChild(document.createTextNode(value.slice(cursor, nextIndex)));
+                }
+
+                const { text, url } = linkMap[nextToken];
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.target = "_blank";
+                anchor.rel = "noopener noreferrer";
+                anchor.textContent = text;
+                fragment.appendChild(anchor);
+
+                cursor = nextIndex + nextToken.length;
+            }
+
+            textNode.parentNode?.replaceChild(fragment, textNode);
+        }
     }
 
     // Removes Obsidian's CSS variable references
@@ -269,6 +315,26 @@ export default class SubstackCopyPlugin extends Plugin {
         });
         // Explicitly set base text color
         (container as any).style.color = "#000000";
+    }
+
+    sanitizeHtml(container: HTMLElement) {
+        container.querySelectorAll("*").forEach((el) => {
+            const tagName = el.tagName.toLowerCase();
+            const allowedAttrs = new Set<string>();
+
+            if (tagName === "a") {
+                allowedAttrs.add("href");
+            } else if (tagName === "img") {
+                allowedAttrs.add("src");
+                allowedAttrs.add("alt");
+            }
+
+            Array.from(el.attributes).forEach((attr) => {
+                if (!allowedAttrs.has(attr.name.toLowerCase())) {
+                    el.removeAttribute(attr.name);
+                }
+            });
+        });
     }
 
     // Reduces extra spacing from li > p etc.
@@ -290,7 +356,7 @@ export default class SubstackCopyPlugin extends Plugin {
     }
 
     // Fixes links after rendering
-    fixLinks(container: HTMLElement, isMobile = false) {
+    fixLinks(container: HTMLElement) {
         const links = container.querySelectorAll("a");
         links.forEach((link) => {
             const href = link.getAttribute("href") || "";
@@ -299,12 +365,9 @@ export default class SubstackCopyPlugin extends Plugin {
                 link.setAttribute("href", href);
                 link.setAttribute("target", "_blank");
                 link.setAttribute("rel", "noopener noreferrer");
-            } else if (href.startsWith("app://") || href.startsWith("obsidian://")) {
+            } else {
                 const text = document.createTextNode(linkText);
                 link.parentNode?.replaceChild(text, link);
-            } else {
-                link.removeAttribute("href");
-                link.removeAttribute("target");
             }
         });
     }

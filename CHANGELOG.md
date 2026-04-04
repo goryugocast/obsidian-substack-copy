@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.8] - 2026-04-04
+### Fixed
+- Prevented external link placeholders from colliding with numbered links later in the document.
+- Replaced HTML string rewriting with DOM-based link restoration to avoid malformed pasted output such as stray `dir="auto">`.
+- Stripped nonessential HTML attributes and flattened internal links to plain text for more reliable Substack pasting.
+
 ## [0.1.7] - 2026-03-27
 ### Fixed
 - Improved mobile clipboard handling with multiple fallback paths for rich text and plain text copy.
