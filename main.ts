@@ -203,6 +203,10 @@ export default class SubstackCopyPlugin extends Plugin {
 
     async replaceImagesWithBase64(container: HTMLElement, sourcePath: string) {
         const images = container.querySelectorAll('img');
+        // Resource URLs identify the rendered file, even when several files share a name.
+        // Ignore cache-busting timestamps, which can change after Markdown rendering.
+        const resourceKey = (url: string) => decodeURIComponent(url.split(/[?#]/)[0]);
+        let resourceFiles: Map<string, TFile> | undefined;
 
         for (let i = 0; i < images.length; i++) {
             const img = images[i];
@@ -211,16 +215,20 @@ export default class SubstackCopyPlugin extends Plugin {
             if (!src) continue;
 
             try {
-                if (src.startsWith('http://') || src.startsWith('https://')) {
-                    continue;
+                if (/^(https?:|data:)/i.test(src)) continue;
+
+                let file: TFile | null | undefined;
+                if (/^[a-z][a-z0-9+.-]*:/i.test(src)) {
+                    if (!resourceFiles) {
+                        resourceFiles = new Map(this.app.vault.getFiles().map(file => [
+                            resourceKey(this.app.vault.getResourcePath(file)), file,
+                        ]));
+                    }
+                    file = resourceFiles.get(resourceKey(src));
+                    // Unknown resource URLs must never fall back to a same-named file.
+                } else {
+                    file = this.app.metadataCache.getFirstLinkpathDest(resourceKey(src), sourcePath);
                 }
-
-                let filenameRaw = src.split('/').pop()?.split('?')[0];
-                if (!filenameRaw) continue;
-
-                let filename = decodeURIComponent(filenameRaw);
-
-                let file = this.app.metadataCache.getFirstLinkpathDest(filename, sourcePath);
 
                 if (file) {
                     const arrayBuffer = await this.app.vault.readBinary(file);
