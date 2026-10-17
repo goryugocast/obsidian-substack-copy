@@ -1,0 +1,10 @@
+{
+    "id": "obsidian-substack-copy",
+    "name": "Substack Copy",
+    "version": "0.1.8",
+    "minAppVersion": "0.15.0",
+    "description": "Copy formatted text and images for Substack (Mobile & Desktop).",
+    "author": "goryugo",
+    "authorUrl": "https://github.com/goryugocast/obsidian-substack-copy",
+    "isDesktopOnly": false
+}

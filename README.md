@@ -32,6 +32,11 @@ npm install
 npm run dev
 ```
 
+`npm run build` produces `main.js` in this repository without deploying it.
+The tracked `manifest.json` is the unchanged manifest from the
+[v0.1.8 release](https://github.com/goryugocast/obsidian-substack-copy/releases/tag/v0.1.8),
+matching `package.json` and `version.txt`; a clean checkout needs no locally supplied manifest.
+
 ## Known Issues
 
 - **Mobile Clipboard Size Limit**: On iOS/iPadOS, attempting to copy articles with large or multiple images may result in an "Unable to encode image" or "NotAllowedError" due to the operating system's strict limit on clipboard data size. If this happens, try copying the article in smaller chunks or plain text.
