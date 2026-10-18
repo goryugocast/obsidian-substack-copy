@@ -5,7 +5,6 @@
 fs_cache/
 main.js
 styles.css
-manifest.json
 
 # Node modules
 node_modules/
